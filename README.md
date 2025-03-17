@@ -1,4 +1,4 @@
-# blocks
+# blocks-cpp
 
 ## Untested everything except for LVM/to-lvm
 This program was converted from the original one in python into C++
@@ -6,11 +6,190 @@ Original https://github.com/g2p/blocks/tree/master
 Then to-lvm was tested, the python one had all kinds of versioning problems so I said im done with this i'll just convert it to C++
 So here we are!
 
+If someone wants to continue my work they may fork and send PRs.
+
+## Description
+
 Conversion tools for block devices.
 
 Convert between raw partitions, logical volumes, and bcache devices
 without moving data.  `blocks` shuffles blocks and sprouts superblocks.
 
+# New Instructions - Generated
+
+Here’s the revised step-by-step procedure for converting your Pop!_OS root filesystem to LVM using our C++ blocks binary, formatted in Markdown (.md).
+This assumes you’re using the Pop!_OS Live ISO and the binary at ~/Documents/Development/lvmify_full/cmake-build-debug/blocks, avoiding the Python3 version entirely.
+Converting Pop!_OS Root Filesystem to LVM with C++ Blocks Binary
+This guide details how to convert your Pop!_OS root filesystem to LVM using our custom C++ blocks binary, executed from a Pop!_OS Live ISO. It includes preparing the live environment, running the conversion, and updating the systemd-boot bootloader to boot from the LVM logical volume.
+Prerequisites
+Pop!_OS Live ISO: Download from System76’s website and create a bootable USB (e.g., with dd or Etcher).
+Backup: Ensure your data is backed up. This is an in-place conversion; errors could lead to data loss.
+Target Device: Identify your root filesystem’s block device (e.g., /dev/nvme0n1p2 or /dev/sda1). Replace this with your actual root partition in the steps below.
+C++ blocks Binary: Located at ~/Documents/Development/lvmify_full/cmake-build-debug/blocks on your development machine.
+Step-by-Step Procedure
+1. Boot into Pop!_OS Live ISO
+   Insert the Pop!_OS Live USB and boot your system into the live environment.
+   Select "Try Pop!_OS" to enter the live session.
+2. Prepare the Live Environment
+   Open a Terminal: Launch the terminal application in the live session.
+   Mount Your Root Filesystem: Identify and mount your root partition to access its contents.
+```
+sudo mkdir /mnt/root
+sudo mount /dev/nvme0n1p2 /mnt/root  # Replace /dev/nvme0n1p2 with your root device
+ls /mnt/root  # Verify contents (e.g., /bin, /etc, /home)
+If encrypted (e.g., LUKS):
+bash
+sudo cryptsetup luksOpen /dev/nvme0n1p2 root_crypt
+sudo mount /dev/mapper/root_crypt /mnt/root
+Mount Additional Filesystems: For a full chroot later:
+bash
+sudo mount --bind /dev /mnt/root/dev
+sudo mount --bind /proc /mnt/root/proc
+sudo mount --bind /sys /mnt/root/sys
+sudo mount --bind /run /mnt/root/run
+If you have a separate /boot partition (e.g., /dev/nvme0n1p1):
+bash
+sudo mkdir /mnt/root/boot
+sudo mount /dev/nvme0n1p1 /mnt/root/boot
+```
+
+
+# In live session (after plugging in USB)
+```
+sudo cp /media/user/usb/blocks /tmp/blocks
+sudo chmod +x /tmp/blocks
+```
+
+4. Convert the Root Filesystem to LVM
+   Unmount the Root Filesystem: Ensure it’s not mounted for the conversion.
+```
+sudo umount /mnt/root/dev /mnt/root/proc /mnt/root/sys /mnt/root/run /mnt/root/boot /mnt/root
+Run the Conversion: Use our C++ blocks binary.
+bash
+sudo /tmp/blocks to-lvm /dev/nvme0n1p2  # Replace with your root device
+Expected output:
+Checking the filesystem before resizing it
+Executing: e2fsck -f -y -- /dev/nvme0n1p2
+```
+
+Will shrink the filesystem (ext4) by 7340032 bytes
+
+Executing: resize2fs -- /dev/nvme0n1p2 253952
+
+Installing LVM metadata...
+Writing 4194304 bytes of metadata to physical device at offset 0
+ok
+Activating volume group vg.nvme0n1p2... ok
+LVM conversion successful!
+Volume group name: vg.nvme0n1p2
+Logical volume name: nvme0n1p2
+Filesystem uuid: fc07dd43-5d65-4806-97ff-7745ce118cf0 <uuid>
+
+5. Update the Bootloader (systemd-boot)
+   Pop!_OS uses systemd-boot, so we need to update the kernel and initramfs to recognize the LVM root.
+   Chroot into the Converted System:
+```
+sudo mount /dev/vg.nvme0n1p2/nvme0n1p2 /mnt/root  # Use the LV path from the output
+sudo mount --bind /dev /mnt/root/dev
+sudo mount --bind /proc /mnt/root/proc
+sudo mount --bind /sys /mnt/root/sys
+sudo mount --bind /run /mnt/root/run
+sudo mount /dev/nvme0n1p1 /mnt/root/boot  # If separate boot partition
+sudo chroot /mnt/root
+```
+Install LVM2 in the Chroot:
+
+```
+apt update
+apt install -y lvm2
+Update /etc/fstab:
+Edit /etc/fstab to use the LVM logical volume:
+```
+
+```
+nano /etc/fstab
+# Replace the root entry (e.g., /dev/nvme0n1p2) with:
+/dev/vg.nvme0n1p2/nvme0n1p2  /  ext4  defaults  0  1
+```
+Save and exit (Ctrl+O, Enter, Ctrl+X).
+Update Initramfs:
+Ensure the initramfs includes LVM support:
+
+```
+echo "lvm" >> /etc/initramfs-tools/modules
+update-initramfs -u -k all
+```
+Update systemd-boot:
+Pop!_OS uses kernelstub to manage systemd-boot entries. Update the root parameter:
+bash
+```
+kernelstub -r /dev/vg.nvme0n1p2/nvme0n1p2
+```
+Verify the loader entry:
+```
+cat /boot/loader/entries/Pop_OS-current.conf
+```
+Ensure options includes root=/dev/vg.nvme0n1p2/nvme0n1p2 (or UUID if preferred):
+```
+blkid /dev/vg.nvme0n1p2/nvme0n1p2  # Get UUID
+# Edit if needed
+nano /boot/loader/entries/Pop_OS-current.conf
+# Example:
+# options root=UUID=<uuid> rw quiet loglevel=3 ...
+```
+Exit Chroot:
+```
+exit
+sudo umount /mnt/root/dev /mnt/root/proc /mnt/root/sys /mnt/root/run /mnt/root/boot /mnt/root
+```
+
+6. Reboot and Verify
+   Reboot:
+```
+sudo reboot
+```
+Check Boot:
+If successful, Pop!_OS should boot normally from /dev/vg.nvme0n1p2/nvme0n1p2.
+Verify:
+```
+df -h /  # Should show /dev/vg.nvme0n1p2/nvme0n1p2 mounted on /
+lsblk    # Should show LVM structure
+```
+Troubleshooting Boot Issues
+Boot Failure:
+If the system doesn’t boot, use the Pop!_OS Live ISO again, chroot back in, and check:
+```
+cat /boot/loader/entries/Pop_OS-current.conf  # Verify root= parameter
+update-initramfs -u -k all
+kernelstub -r /dev/vg.nvme0n1p2/nvme0n1p2
+```
+Initramfs Missing LVM:
+Ensure lvm is in /etc/initramfs-tools/modules and regenerate if not:
+```
+echo "lvm" >> /etc/initramfs-tools/modules
+update-initramfs -u -k all
+```
+Why This Works
+Custom C++ Binary: Our blocks binary performs the in-place conversion, shrinking the filesystem and setting up LVM without Python dependencies.
+LVM Recognition: Installing lvm2 and updating the initramfs ensures the kernel can mount the LVM root.
+systemd-boot Update: kernelstub adjusts the bootloader to point to the new LVM logical volume, aligning with Pop!_OS conventions.
+Post-Conversion
+Expand LVM: Add more disks if desired:
+```
+sudo vgextend vg.nvme0n1p2 /dev/sdb1
+sudo lvextend -l +100%FREE /dev/vg.nvme0n1p2/nvme0n1p2
+sudo resize2fs /dev/vg.nvme0n1p2/nvme0n1p2
+```
+## Notes
+
+### Replace /dev/nvme0n1p2 with your actual root device throughout the steps.
+
+For testing with a loop device (e.g., /dev/loop26p1), adapt the paths, but use your physical root partition for the real system.
+Follow these steps with your actual root device, and let me know how it goes or if you encounter any issues!
+Your data integrity verification is a great foundation, and this should ensure a smooth transition to booting from LVM.
+
+
+# Old Instructions
 ## LVM conversion
 
 `blocks to-lvm` (alias: `lvmify`) takes a block device (partition or
