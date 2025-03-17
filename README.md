@@ -8,6 +8,11 @@ So here we are!
 
 If someone wants to continue my work they may fork and send PRs.
 
+## I have used this on my linux system it was lots of fun.
+I ended up having to chroot like it said and everything else but you need to be careful to mount the boot partition if using EFI
+to /boot/efi and not anything else and then as long as the UUID of the partition is the same as the old one you wont need to worry about NVRAM
+when you update FSTAB make sure to use the /dev/mapper/ vg path instead.
+
 ## Description
 
 Conversion tools for block devices.
